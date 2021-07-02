@@ -15,6 +15,8 @@ type ServerPool struct {
 	mux   sync.Mutex
 }
 
+// GetNextNode returns the next ServerNode available
+// for traffic
 func (s *ServerPool) GetNextNode() *ServerNode {
 	s.mux.Lock()
 	if len(s.queue) < 1 {
@@ -42,6 +44,18 @@ func (s *ServerPool) GetNextNode() *ServerNode {
 func (s *ServerPool) RegisterNode(node *ServerNode) {
 	s.mux.Lock()
 	s.queue = append(s.queue, node)
+	s.mux.Unlock()
+}
+
+// DeregisterNode removes a node from the ServerPool
+// based matching on URL
+func (s *ServerPool) DeregisterNode(nodeURL string) {
+	s.mux.Lock()
+	for i, v := range s.queue {
+		if v.URL.String() == nodeURL {
+			s.queue = append(s.queue[:i], s.queue[i+1:]...)
+		}
+	}
 	s.mux.Unlock()
 }
 

@@ -2,6 +2,8 @@ package lb
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -13,6 +15,14 @@ const (
 	Attempts = iota
 	Retry
 )
+
+type Response struct {
+	Message string `json:"message"`
+}
+
+type Register struct {
+	URL string `json:"url"`
+}
 
 type LoadBalancer struct {
 	pool *ServerPool
@@ -47,10 +57,33 @@ func (lb *LoadBalancer) HttpHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Service not available", http.StatusServiceUnavailable)
 }
 
-// ConfigHandler configuration handler for registering
-// and deregistering nodes among other things.
-func (lb *LoadBalancer) ConfigHandler(w http.ResponseWriter, r *http.Request) {
+// RegisterHandler handles requests for registersing hosts/nodes
+// to the load balancer.
+func (lb *LoadBalancer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req Register
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	lb.RegisterNode(req.URL)
+	json.NewEncoder(w).Encode(Response{fmt.Sprintf("Successfully Registered: %v", req.URL)})
+}
 
+// DeregisterHandler handles request for removing a host/node from
+// the load balancer.
+func (lb *LoadBalancer) DeregisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req Register
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	go lb.DeregisterNode(req.URL)
+	json.NewEncoder(w).Encode(Response{fmt.Sprintf("Deregistering: %v", req.URL)})
+}
+
+// DeregisterNode Finds and removes the node with matching URL from the queue.
+func (lb *LoadBalancer) DeregisterNode(nodeURL string) {
+	lb.pool.DeregisterNode(nodeURL)
 }
 
 // RegisterNode Creates and registers a ServerNode with
