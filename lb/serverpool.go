@@ -20,17 +20,20 @@ type ServerPool struct {
 func (s *ServerPool) GetNextNode() *ServerNode {
 	s.mux.Lock()
 	if len(s.queue) < 1 {
-		log.Println("No registered hosts")
+		s.mux.Unlock()
 		return nil
 	}
 
-	var next *ServerNode
-	for next = s.queue[0]; next != nil && !next.Alive; next = s.queue[0] {
+	next := s.queue[0]
+	for next != nil && !next.IsAlive() {
 		s.queue = s.queue[1:] // remove dead nodes from queue
-	}
-	if next == nil {
-		log.Println("No healthy hosts")
-		return nil
+		if len(s.queue) >= 1 {
+			next = s.queue[0]
+		} else {
+			log.Println("No healthy hosts")
+			s.mux.Unlock()
+			return nil
+		}
 	}
 
 	s.queue = s.queue[1:]           // dequeue
@@ -70,7 +73,7 @@ func (s *ServerPool) HealthChecks() {
 			for _, b := range s.queue {
 				alive := isBackendAlive(b.URL)
 				b.SetAlive(alive)
-				log.Printf("%s [%s]\n", b.URL, boolMap[alive])
+				log.Printf("%s [%s] - %d\n", b.URL, boolMap[alive], len(b.ActiveRequests))
 			}
 			log.Println("Health Checks Completed.")
 		}

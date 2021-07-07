@@ -51,6 +51,7 @@ func (lb *LoadBalancer) HttpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	peer := lb.pool.GetNextNode()
 	if peer != nil {
+		peer.AddActiveRequest(r)
 		peer.ReverseProxy.ServeHTTP(w, r)
 		return
 	}
@@ -97,17 +98,17 @@ func (lb *LoadBalancer) RegisterNode(nodeURL string) {
 		retries := GetRetryFromContext(request)
 		if retries < 3 {
 			select {
-			case <-time.After(10 * time.Millisecond):
+			case <-time.After(200 * time.Millisecond):
+				log.Printf("%s(%s) Retry %d\n", request.RemoteAddr, request.URL.Path, retries+1)
 				ctx := context.WithValue(request.Context(), Retry, retries+1)
 				node.ReverseProxy.ServeHTTP(writer, request.WithContext(ctx))
 			}
 			return
 		}
-		node.SetAlive(false)
 
 		attempts := GetAttemptsFromContext(request)
-		log.Printf("%s(%s) Attempting retry %d\n", request.RemoteAddr, request.URL.Path, attempts)
 		ctx := context.WithValue(request.Context(), Attempts, attempts+1)
+		log.Printf("%s(%s) Starting Attempt %d\n", request.RemoteAddr, request.URL.Path, attempts+1)
 		lb.HttpHandler(writer, request.WithContext(ctx))
 	}
 	lb.pool.RegisterNode(node)
