@@ -1,11 +1,15 @@
 package lb
 
 import (
+	"container/heap"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var boolMap = map[bool]string{true: "up", false: "down"}
@@ -15,51 +19,109 @@ type ServerPool struct {
 	mux   sync.Mutex
 }
 
+func NewPool() *ServerPool {
+	return &ServerPool{
+		queue: []*ServerNode{},
+	}
+}
+
+func (s *ServerPool) Len() int {
+	return len(s.queue)
+}
+
+func (s *ServerPool) Less(i, j int) bool {
+	return len(s.queue[i].ActiveRequests) < len(s.queue[j].ActiveRequests)
+}
+
+func (s *ServerPool) Swap(i, j int) {
+	s.queue[i], s.queue[j] = s.queue[j], s.queue[i]
+	s.queue[i].poolIndex = i
+	s.queue[j].poolIndex = j
+}
+
+// Push adds ServerNode to the end of the queue
+func (s *ServerPool) Push(x interface{}) {
+	length := len(s.queue)
+	node := x.(*ServerNode)
+	node.poolIndex = length
+	s.queue = append(s.queue, node)
+}
+
+// Pop removes and returns value at the
+// end of the ServerNode queue
+func (s *ServerPool) Pop() interface{} {
+	end := len(s.queue) - 1
+	node := s.queue[end]
+	s.queue[end] = nil
+	s.queue = s.queue[:end]
+	node.poolIndex = -1
+
+	return node
+}
+
+func (s *ServerPool) AddRequestToNode(node *ServerNode, req *http.Request) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	uuid := uuid.New().String()
+	node.AddActiveRequest(uuid, req)
+	heap.Fix(s, node.poolIndex)
+
+	go func() {
+		for {
+			select {
+			case <-req.Context().Done():
+				s.mux.Lock()
+				defer s.mux.Unlock()
+				node.RemoveRequest(uuid)
+				heap.Fix(s, node.poolIndex)
+				return
+			}
+		}
+	}()
+}
+
 // GetNextNode returns the next ServerNode available
 // for traffic
 func (s *ServerPool) GetNextNode() *ServerNode {
 	s.mux.Lock()
-	if len(s.queue) < 1 {
-		s.mux.Unlock()
+	defer s.mux.Unlock()
+	length := s.Len()
+	if length < 1 {
 		return nil
 	}
 
-	next := s.queue[0]
+	next := heap.Pop(s).(*ServerNode)
+
 	for next != nil && !next.IsAlive() {
-		s.queue = s.queue[1:] // remove dead nodes from queue
-		if len(s.queue) >= 1 {
-			next = s.queue[0]
+		if s.Len() >= 1 {
+			next = heap.Pop(s).(*ServerNode)
 		} else {
 			log.Println("No healthy hosts")
-			s.mux.Unlock()
 			return nil
 		}
 	}
 
-	s.queue = s.queue[1:]           // dequeue
-	s.queue = append(s.queue, next) // requeue in back of the line
-
-	s.mux.Unlock()
+	heap.Push(s, next)
 	return next
 }
 
 // RegisterNode registers a new node to the server pool
 func (s *ServerPool) RegisterNode(node *ServerNode) {
 	s.mux.Lock()
-	s.queue = append(s.queue, node)
-	s.mux.Unlock()
+	defer s.mux.Unlock()
+	heap.Push(s, node)
 }
 
 // DeregisterNode removes a node from the ServerPool
 // based matching on URL
 func (s *ServerPool) DeregisterNode(nodeURL string) {
 	s.mux.Lock()
-	for i, v := range s.queue {
+	defer s.mux.Unlock()
+	for _, v := range s.queue {
 		if v.URL.String() == nodeURL {
-			s.queue = append(s.queue[:i], s.queue[i+1:]...)
+			heap.Remove(s, v.poolIndex)
 		}
 	}
-	s.mux.Unlock()
 }
 
 // HealthChecks runs health checks on all nodes in

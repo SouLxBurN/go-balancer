@@ -32,9 +32,7 @@ type LoadBalancer struct {
 // and spawn healthcheck routine.
 func Start() *LoadBalancer {
 	lb := &LoadBalancer{
-		pool: &ServerPool{
-			queue: []*ServerNode{},
-		},
+		pool: NewPool(),
 	}
 
 	go lb.pool.HealthChecks()
@@ -49,10 +47,10 @@ func (lb *LoadBalancer) HttpHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Service not available", http.StatusServiceUnavailable)
 		return
 	}
-	peer := lb.pool.GetNextNode()
-	if peer != nil {
-		peer.AddActiveRequest(r)
-		peer.ReverseProxy.ServeHTTP(w, r)
+	node := lb.pool.GetNextNode()
+	if node != nil {
+		lb.pool.AddRequestToNode(node, r)
+		node.ReverseProxy.ServeHTTP(w, r)
 		return
 	}
 	http.Error(w, "Service not available", http.StatusServiceUnavailable)

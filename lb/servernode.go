@@ -5,8 +5,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"sync"
-
-	"github.com/google/uuid"
 )
 
 type ServerNode struct {
@@ -15,39 +13,36 @@ type ServerNode struct {
 	mux            sync.RWMutex
 	ActiveRequests map[string]*http.Request
 	ReverseProxy   *httputil.ReverseProxy
+	poolIndex      int
 }
 
-func (n *ServerNode) AddActiveRequest(req *http.Request) {
+func (n *ServerNode) AddActiveRequest(uuid string, req *http.Request) {
 	n.mux.Lock()
+	defer n.mux.Unlock()
 	if n.ActiveRequests == nil {
 		n.ActiveRequests = make(map[string]*http.Request)
 	}
-	uuid := uuid.New().String()
 	n.ActiveRequests[uuid] = req
-	n.mux.Unlock()
+}
 
-	go func() {
-		for {
-			select {
-			case <-req.Context().Done():
-				n.mux.Lock()
-				delete(n.ActiveRequests, uuid)
-				n.mux.Unlock()
-				return
-			}
-		}
-	}()
+func (n *ServerNode) RemoveRequest(uuid string) {
+	n.mux.Lock()
+	defer n.mux.Unlock()
+	if n.ActiveRequests == nil {
+		n.ActiveRequests = make(map[string]*http.Request)
+	}
+	delete(n.ActiveRequests, uuid)
 }
 
 func (n *ServerNode) SetAlive(alive bool) {
 	n.mux.Lock()
+	defer n.mux.Unlock()
 	n.Alive = alive
-	n.mux.Unlock()
 }
 
 func (n *ServerNode) IsAlive() bool {
 	n.mux.RLock()
+	defer n.mux.RUnlock()
 	alive := n.Alive
-	n.mux.RUnlock()
 	return alive
 }
