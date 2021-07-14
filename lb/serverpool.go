@@ -126,8 +126,7 @@ func (s *ServerPool) DeregisterNode(nodeURL string) {
 
 // HealthChecks runs health checks on all nodes in
 // the ServerPool
-func (s *ServerPool) HealthChecks() {
-	t := time.NewTicker(time.Second * 5)
+func (s *ServerPool) HealthChecks(t *time.Ticker) {
 	for {
 		select {
 		case <-t.C:

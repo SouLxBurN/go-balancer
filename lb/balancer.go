@@ -20,12 +20,23 @@ type Response struct {
 	Message string `json:"message"`
 }
 
-type Register struct {
+type RegisterRequest struct {
 	URL string `json:"url"`
 }
 
+type Configuration struct {
+	HCTicker *time.Ticker
+	Retries  int
+}
+
+type ConfigRequest struct {
+	HCFrequency int64 `json:"hcFrequency"`
+	Retries     int   `json:"retries"`
+}
+
 type LoadBalancer struct {
-	pool *ServerPool
+	pool   *ServerPool
+	config *Configuration
 }
 
 // Start Creates an empty load balancer
@@ -33,16 +44,20 @@ type LoadBalancer struct {
 func Start() *LoadBalancer {
 	lb := &LoadBalancer{
 		pool: NewPool(),
+		config: &Configuration{
+			time.NewTicker(time.Second * 60),
+			3,
+		},
 	}
 
-	go lb.pool.HealthChecks()
+	go lb.pool.HealthChecks(lb.config.HCTicker)
 	return lb
 }
 
 // HttpHandler main load balancing handler
 func (lb *LoadBalancer) HttpHandler(w http.ResponseWriter, r *http.Request) {
 	attempts := GetAttemptsFromContext(r)
-	if attempts > 3 {
+	if attempts > lb.config.Retries {
 		log.Printf("%s(%s) Max attempts reached, terminating\n", r.RemoteAddr, r.URL.Path)
 		http.Error(w, "Service not available", http.StatusServiceUnavailable)
 		return
@@ -59,7 +74,7 @@ func (lb *LoadBalancer) HttpHandler(w http.ResponseWriter, r *http.Request) {
 // RegisterHandler handles requests for registersing hosts/nodes
 // to the load balancer.
 func (lb *LoadBalancer) RegisterHandler(w http.ResponseWriter, r *http.Request) {
-	var req Register
+	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
@@ -71,13 +86,25 @@ func (lb *LoadBalancer) RegisterHandler(w http.ResponseWriter, r *http.Request) 
 // DeregisterHandler handles request for removing a host/node from
 // the load balancer.
 func (lb *LoadBalancer) DeregisterHandler(w http.ResponseWriter, r *http.Request) {
-	var req Register
+	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
 	go lb.DeregisterNode(req.URL)
 	json.NewEncoder(w).Encode(Response{fmt.Sprintf("Deregistering: %v", req.URL)})
+}
+
+// ConfigHanlder handles requests for effecting the global configuration of the load balancer
+func (lb *LoadBalancer) ConfigHandler(w http.ResponseWriter, r *http.Request) {
+	var req ConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	lb.config.Retries = req.Retries
+	lb.config.HCTicker.Reset(time.Second * time.Duration(req.HCFrequency))
+	json.NewEncoder(w).Encode(Response{"Configuration Updated."})
 }
 
 // DeregisterNode Finds and removes the node with matching URL from the queue.
@@ -94,7 +121,7 @@ func (lb *LoadBalancer) RegisterNode(nodeURL string) {
 	node.ReverseProxy.ErrorHandler = func(writer http.ResponseWriter, request *http.Request, err error) {
 		log.Printf("[%s] %s\n", node.URL.Host, err.Error())
 		retries := GetRetryFromContext(request)
-		if retries < 3 {
+		if retries < lb.config.Retries {
 			select {
 			case <-time.After(200 * time.Millisecond):
 				log.Printf("%s(%s) Retry %d\n", request.RemoteAddr, request.URL.Path, retries+1)

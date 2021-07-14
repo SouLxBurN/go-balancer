@@ -16,6 +16,7 @@ func main() {
 // in a separate goroutine.
 func startConfigServer(loadBalancer *lb.LoadBalancer) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/config", loadBalancer.ConfigHandler)
 	mux.HandleFunc("/register", loadBalancer.RegisterHandler)
 	mux.HandleFunc("/deregister", loadBalancer.DeregisterHandler)
 	configServer := http.Server{
