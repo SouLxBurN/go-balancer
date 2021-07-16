@@ -16,24 +16,37 @@ const (
 	Retry
 )
 
+// Response Generic response object for
+// API endpoints
 type Response struct {
 	Message string `json:"message"`
 }
 
+// RegisterRequest Request body representation
+// for the /register, and /deregister endpoints.
 type RegisterRequest struct {
 	URL string `json:"url"`
 }
 
-type Configuration struct {
-	HCTicker *time.Ticker
-	Retries  int
-}
-
+// ConfigRequest Request body representation
+// for /config endpoint.
 type ConfigRequest struct {
-	HCFrequency int64 `json:"hcFrequency"`
-	Retries     int   `json:"retries"`
+	HCFrequency *int64 `json:"hcFrequency"`
+	Retries     *int   `json:"retries"`
+	RetryDelay  *int   `json:"retryDelay"`
 }
 
+// Configuration Stores load balancer
+// config and a reference to healthcheck
+// ticker for frequency updates on the fly.
+type Configuration struct {
+	HCTicker   *time.Ticker
+	Retries    int
+	RetryDelay int
+}
+
+// LoadBalancer Contains pool of ServerNodes
+// and load balancer configuration.
 type LoadBalancer struct {
 	pool   *ServerPool
 	config *Configuration
@@ -47,6 +60,7 @@ func Start() *LoadBalancer {
 		config: &Configuration{
 			time.NewTicker(time.Second * 60),
 			3,
+			1000,
 		},
 	}
 
@@ -56,12 +70,6 @@ func Start() *LoadBalancer {
 
 // HttpHandler main load balancing handler
 func (lb *LoadBalancer) HttpHandler(w http.ResponseWriter, r *http.Request) {
-	attempts := GetAttemptsFromContext(r)
-	if attempts > lb.config.Retries {
-		log.Printf("%s(%s) Max attempts reached, terminating\n", r.RemoteAddr, r.URL.Path)
-		http.Error(w, "Service not available", http.StatusServiceUnavailable)
-		return
-	}
 	node := lb.pool.GetNextNode()
 	if node != nil {
 		lb.pool.AddRequestToNode(node, r)
@@ -102,8 +110,17 @@ func (lb *LoadBalancer) ConfigHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	lb.config.Retries = req.Retries
-	lb.config.HCTicker.Reset(time.Second * time.Duration(req.HCFrequency))
+
+	if req.Retries != nil {
+		lb.config.Retries = *req.Retries
+	}
+	if req.HCFrequency != nil {
+		lb.config.HCTicker.Reset(time.Second * time.Duration(*req.HCFrequency))
+	}
+	if req.RetryDelay != nil {
+		lb.config.RetryDelay = *req.RetryDelay
+	}
+
 	json.NewEncoder(w).Encode(Response{"Configuration Updated."})
 }
 
@@ -123,7 +140,7 @@ func (lb *LoadBalancer) RegisterNode(nodeURL string) {
 		retries := GetRetryFromContext(request)
 		if retries < lb.config.Retries {
 			select {
-			case <-time.After(200 * time.Millisecond):
+			case <-time.After(time.Duration(lb.config.RetryDelay) * time.Millisecond):
 				log.Printf("%s(%s) Retry %d\n", request.RemoteAddr, request.URL.Path, retries+1)
 				ctx := context.WithValue(request.Context(), Retry, retries+1)
 				node.ReverseProxy.ServeHTTP(writer, request.WithContext(ctx))
@@ -132,6 +149,11 @@ func (lb *LoadBalancer) RegisterNode(nodeURL string) {
 		}
 
 		attempts := GetAttemptsFromContext(request)
+		if attempts >= lb.config.Retries {
+			log.Printf("%s(%s) Max attempts reached, terminating\n", request.RemoteAddr, request.URL.Path)
+			http.Error(writer, "Service not available", http.StatusServiceUnavailable)
+			return
+		}
 		ctx := context.WithValue(request.Context(), Attempts, attempts+1)
 		log.Printf("%s(%s) Starting Attempt %d\n", request.RemoteAddr, request.URL.Path, attempts+1)
 		lb.HttpHandler(writer, request.WithContext(ctx))

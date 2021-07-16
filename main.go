@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"go-balance/lb"
+	"go-balancer/lb"
 	"net/http"
 )
 

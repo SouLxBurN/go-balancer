@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+// ServerNode Represents host or node
+// registered to the load balancer.
 type ServerNode struct {
 	URL            *url.URL
 	Alive          bool
@@ -16,6 +18,7 @@ type ServerNode struct {
 	poolIndex      int
 }
 
+// AddActiveRequest Adds a request to the ActiveRequests map.
 func (n *ServerNode) AddActiveRequest(uuid string, req *http.Request) {
 	n.mux.Lock()
 	defer n.mux.Unlock()
@@ -25,6 +28,7 @@ func (n *ServerNode) AddActiveRequest(uuid string, req *http.Request) {
 	n.ActiveRequests[uuid] = req
 }
 
+// RemoveRequest Removes a reqest from the ActiveRequests map.
 func (n *ServerNode) RemoveRequest(uuid string) {
 	n.mux.Lock()
 	defer n.mux.Unlock()
@@ -34,12 +38,14 @@ func (n *ServerNode) RemoveRequest(uuid string) {
 	delete(n.ActiveRequests, uuid)
 }
 
+// SetAlive Setter for the Alive field.
 func (n *ServerNode) SetAlive(alive bool) {
 	n.mux.Lock()
 	defer n.mux.Unlock()
 	n.Alive = alive
 }
 
+// IsAlive Getter for the Alive field.
 func (n *ServerNode) IsAlive() bool {
 	n.mux.RLock()
 	defer n.mux.RUnlock()

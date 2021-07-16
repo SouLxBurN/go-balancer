@@ -1,4 +1,4 @@
-module go-balance
+module go-balancer
 
 go 1.16
 

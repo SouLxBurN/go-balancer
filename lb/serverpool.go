@@ -12,34 +12,43 @@ import (
 	"github.com/google/uuid"
 )
 
+// boolMap Converter map of true false values
+// to string representations of up and down.
 var boolMap = map[bool]string{true: "up", false: "down"}
 
+// ServerPool Heap interface
+// contains priorty queue of ServerNode.
 type ServerPool struct {
 	queue []*ServerNode
 	mux   sync.Mutex
 }
 
+// NewPool Instatiates a new ServerPool
+// with an empty queue.
 func NewPool() *ServerPool {
 	return &ServerPool{
 		queue: []*ServerNode{},
 	}
 }
 
+// Len sort.Interface length method.
 func (s *ServerPool) Len() int {
 	return len(s.queue)
 }
 
+// Less sort.Interface comparison method.
 func (s *ServerPool) Less(i, j int) bool {
 	return len(s.queue[i].ActiveRequests) < len(s.queue[j].ActiveRequests)
 }
 
+// Swap sort.Interface it swaps.
 func (s *ServerPool) Swap(i, j int) {
 	s.queue[i], s.queue[j] = s.queue[j], s.queue[i]
 	s.queue[i].poolIndex = i
 	s.queue[j].poolIndex = j
 }
 
-// Push adds ServerNode to the end of the queue
+// Push heap.Interface adds ServerNode to the end of the queue
 func (s *ServerPool) Push(x interface{}) {
 	length := len(s.queue)
 	node := x.(*ServerNode)
@@ -47,7 +56,7 @@ func (s *ServerPool) Push(x interface{}) {
 	s.queue = append(s.queue, node)
 }
 
-// Pop removes and returns value at the
+// Pop heap.Interface removes and returns value at the
 // end of the ServerNode queue
 func (s *ServerPool) Pop() interface{} {
 	end := len(s.queue) - 1
@@ -59,6 +68,9 @@ func (s *ServerPool) Pop() interface{} {
 	return node
 }
 
+// AddRequestToNode Creates a uuid for a http.request and attaches it
+// to a ServerNode for tracking the number of requests pending on a node.
+// Additionally removes the request when the request's context is Done().
 func (s *ServerPool) AddRequestToNode(node *ServerNode, req *http.Request) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
