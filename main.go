@@ -25,13 +25,20 @@ func main() {
 		Addr:    ":4501",
 		Handler: mux,
 	}
-	httpServer := &http.Server{
-		Addr:    ":8080",
+	httpsServer := &http.Server{
+		Addr:    ":443",
 		Handler: http.HandlerFunc(loadBalancer.HttpHandler),
 	}
+	redirectTLS := &http.Server{
+		Addr: ":80",
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://"+r.Host+r.RequestURI, http.StatusMovedPermanently)
+		}),
+	}
 
-	go startServer(configServer, "Config Server")
-	go startServer(httpServer, "Load Balancer")
+	go startServer(redirectTLS, "Redirect TLS Server")
+	go startTLSServer(configServer, "Config Server")
+	go startTLSServer(httpsServer, "Load Balancer")
 
 	<-terminate
 
@@ -41,17 +48,28 @@ func main() {
 	if err := configServer.Shutdown(ctx); err != nil {
 		log.Fatalf("Configuration Server Shutdown Failed: %+v", err)
 	}
-	if err := httpServer.Shutdown(ctx); err != nil {
+	if err := httpsServer.Shutdown(ctx); err != nil {
 		log.Fatalf("Load Balancer Server Shutdown Failed: %+v", err)
+	}
+	if err := redirectTLS.Shutdown(ctx); err != nil {
+		log.Fatalf("Redirect TLS Server Shutdown Failed: %+v", err)
 	}
 
 	log.Print("Server Shutdown Completed Successfully")
 }
 
-// startServer Starts a named *http.Server with error handling.
+// startServer Starts a unsecured named *http.Server with error handling.
 func startServer(server *http.Server, serverName string) {
 	log.Printf("Running %s on port %s\n", serverName, server.Addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("%s Server Closed Unexpectedly.\n%s\n", serverName, err)
+	}
+}
+
+// startTLSServer Starts a secured named *http.Server with error handling.
+func startTLSServer(server *http.Server, serverName string) {
+	log.Printf("Running %s on port %s\n", serverName, server.Addr)
+	if err := server.ListenAndServeTLS("/root/certs/MyCertificate.crt", "/root/certs/MyKey.key"); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("%s Server Closed Unexpectedly.\n%s\n", serverName, err)
 	}
 }

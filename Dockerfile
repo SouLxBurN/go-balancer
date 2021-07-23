@@ -8,4 +8,5 @@ RUN go install
 CMD "go-balancer"
 
 EXPOSE 80
+EXPOSE 443
 EXPOSE 4501

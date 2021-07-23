@@ -129,9 +129,9 @@ func (s *ServerPool) RegisterNode(node *ServerNode) {
 func (s *ServerPool) DeregisterNode(nodeURL string) {
 	s.mux.Lock()
 	defer s.mux.Unlock()
-	for _, v := range s.queue {
-		if v.URL.String() == nodeURL {
-			heap.Remove(s, v.poolIndex)
+	for _, node := range s.queue {
+		if node != nil && node.URL.String() == nodeURL {
+			heap.Remove(s, node.poolIndex)
 		}
 	}
 }
